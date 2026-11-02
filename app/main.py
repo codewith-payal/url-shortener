@@ -6,8 +6,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Link
-from app.utils import generate_code
+from app.models import Click, Link
+from app.utils import generate_code, parse_device
 
 app = FastAPI(title="URL Shortener")
 
@@ -44,8 +44,19 @@ def shorten(body: ShortenRequest, request: Request, db: Session = Depends(get_db
     raise HTTPException(status_code=500, detail="Could not generate a unique code")
 
 @app.get("/{short_code}")
-def redirect(short_code: str, db: Session = Depends(get_db)):
+def redirect(short_code: str, request: Request, db: Session = Depends(get_db)):
     link = db.scalar(select(Link).where(Link.short_code == short_code))
     if link is None:
         raise HTTPException(status_code=404, detail="Short link not found")
+
+    db.add(
+        Click(
+            link_id=link.id,
+            device=parse_device(request.headers.get("user-agent")),
+            referrer=request.headers.get("referer"),
+            country=request.headers.get("cf-ipcountry"),
+        )
+    )
+    db.commit()
+
     return RedirectResponse(link.original_url, status_code=302)

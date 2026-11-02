@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models import Click, Link
 from app.utils import generate_code, parse_device
 from app.cache import get_cached_link, set_cached_link
+from app.ratelimit import rate_limit
 
 app = FastAPI(title="URL Shortener")
 
@@ -27,7 +28,12 @@ class ShortenResponse(BaseModel):
 def health():
     return {"status": "ok"}
 
-@app.post("/shorten", response_model=ShortenResponse, status_code=201)
+@app.post(
+    "/shorten",
+    response_model=ShortenResponse,
+    status_code=201,
+    dependencies=[Depends(rate_limit("shorten", 5, 60))],
+)
 def shorten(body: ShortenRequest, request: Request, db: Session = Depends(get_db)):
     for _ in range(5):
         link = Link(short_code=generate_code(), original_url=str(body.url))

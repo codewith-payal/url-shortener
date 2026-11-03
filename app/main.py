@@ -1,7 +1,8 @@
+from datetime import date
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, HttpUrl
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -74,3 +75,83 @@ def redirect(short_code: str, request: Request, db: Session = Depends(get_db)):
     db.commit()
 
     return RedirectResponse(url, status_code=302, headers={"X-Cache": cache_status})
+
+class DayCount(BaseModel):
+    day: date
+    clicks: int
+
+
+class StatsResponse(BaseModel):
+    short_code: str
+    total_clicks: int
+    by_device: dict[str, int]
+    by_country: dict[str, int]
+    last_7_days: list[DayCount]
+
+def _count_by(db: Session, link_id: int, column) -> dict[str, int]:
+    rows = db.execute(
+        select(column, func.count()).where(Click.link_id == link_id).group_by(column)
+    ).all()
+    return {value or "unknown": count for value, count in rows}
+
+
+@app.get("/links/{short_code}/stats", response_model=StatsResponse)
+def link_stats(short_code: str, db: Session = Depends(get_db)):
+    link = db.scalar(select(Link).where(Link.short_code == short_code))
+    if link is None:
+        raise HTTPException(status_code=404, detail="Short link not found")
+
+    total = db.scalar(
+        select(func.count()).select_from(Click).where(Click.link_id == link.id)
+    )
+
+    day = func.date(Click.clicked_at)
+    daily = db.execute(
+        select(day, func.count())
+        .where(Click.link_id == link.id)
+        .group_by(day)
+        .order_by(day.desc())
+        .limit(7)
+    ).all()
+
+    return StatsResponse(
+        short_code=short_code,
+        total_clicks=total,
+        by_device=_count_by(db, link.id, Click.device),
+        by_country=_count_by(db, link.id, Click.country),
+        last_7_days=[DayCount(day=d, clicks=n) for d, n in daily],
+    )
+
+def _count_by(db: Session, link_id: int, column) -> dict[str, int]:
+    rows = db.execute(
+        select(column, func.count()).where(Click.link_id == link_id).group_by(column)
+    ).all()
+    return {value or "unknown": count for value, count in rows}
+
+
+@app.get("/links/{short_code}/stats", response_model=StatsResponse)
+def link_stats(short_code: str, db: Session = Depends(get_db)):
+    link = db.scalar(select(Link).where(Link.short_code == short_code))
+    if link is None:
+        raise HTTPException(status_code=404, detail="Short link not found")
+
+    total = db.scalar(
+        select(func.count()).select_from(Click).where(Click.link_id == link.id)
+    )
+
+    day = func.date(Click.clicked_at)
+    daily = db.execute(
+        select(day, func.count())
+        .where(Click.link_id == link.id)
+        .group_by(day)
+        .order_by(day.desc())
+        .limit(7)
+    ).all()
+
+    return StatsResponse(
+        short_code=short_code,
+        total_clicks=total,
+        by_device=_count_by(db, link.id, Click.device),
+        by_country=_count_by(db, link.id, Click.country),
+        last_7_days=[DayCount(day=d, clicks=n) for d, n in daily],
+    )

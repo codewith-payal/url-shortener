@@ -1,5 +1,5 @@
-from datetime import date
-from fastapi import Depends, FastAPI, HTTPException, Request
+from datetime import date, datetime
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy import func, select
@@ -51,6 +51,42 @@ def shorten(body: ShortenRequest, request: Request, db: Session = Depends(get_db
         )
     raise HTTPException(status_code=500, detail="Could not generate a unique code")
 
+class LinkItem(BaseModel):
+    short_code: str
+    original_url: str
+    created_at: datetime
+
+
+class LinkPage(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    items: list[LinkItem]
+
+
+@app.get("/links", response_model=LinkPage)
+def list_links(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    total = db.scalar(select(func.count()).select_from(Link))
+    links = db.scalars(
+        select(Link).order_by(Link.id.desc()).limit(limit).offset(offset)
+    ).all()
+    return LinkPage(
+        total=total,
+        limit=limit,
+        offset=offset,
+        items=[
+            LinkItem(
+                short_code=link.short_code,
+                original_url=link.original_url,
+                created_at=link.created_at,
+            )
+            for link in links
+        ],
+    )
 
 @app.get("/{short_code}")
 def redirect(short_code: str, request: Request, db: Session = Depends(get_db)):

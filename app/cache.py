@@ -1,8 +1,10 @@
+import os 
 import json
 
 import redis
 
-redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 CACHE_TTL_SECONDS = 3600  # keep a link in the cache for 1 hour
 

@@ -1,12 +1,12 @@
 from datetime import date, datetime
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import Click, Link
 from app.utils import generate_code, parse_device
 from app.cache import get_cached_link, set_cached_link
@@ -88,8 +88,21 @@ def list_links(
         ],
     )
 
+def record_click(
+    link_id: int, device: str, referrer: str | None, country: str | None
+) -> None:
+    # Runs after the response is sent, so it opens its own database session
+    with SessionLocal() as db:
+        db.add(Click(link_id=link_id, device=device, referrer=referrer, country=country))
+        db.commit()
+
 @app.get("/{short_code}")
-def redirect(short_code: str, request: Request, db: Session = Depends(get_db)):
+def redirect(
+    short_code: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     cached = get_cached_link(short_code)
     if cached:
         link_id, url, cache_status = cached["id"], cached["url"], "HIT"
@@ -100,15 +113,13 @@ def redirect(short_code: str, request: Request, db: Session = Depends(get_db)):
         link_id, url, cache_status = link.id, link.original_url, "MISS"
         set_cached_link(short_code, link_id, url)
 
-    db.add(
-        Click(
-            link_id=link_id,
-            device=parse_device(request.headers.get("user-agent")),
-            referrer=request.headers.get("referer"),
-            country=request.headers.get("cf-ipcountry"),
-        )
+    background_tasks.add_task(
+        record_click,
+        link_id,
+        parse_device(request.headers.get("user-agent")),
+        request.headers.get("referer"),
+        request.headers.get("cf-ipcountry"),
     )
-    db.commit()
 
     return RedirectResponse(url, status_code=302, headers={"X-Cache": cache_status})
 

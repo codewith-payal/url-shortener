@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from app import cache, models, ratelimit  # noqa: F401
+from app import cache, main, models, ratelimit  # noqa: F401
 from app.database import Base, get_db
 from app.main import app
 
@@ -27,6 +27,7 @@ def clean_state(monkeypatch):
     test_redis.flushdb()
     monkeypatch.setattr(cache, "redis_client", test_redis)
     monkeypatch.setattr(ratelimit, "redis_client", test_redis)
+    monkeypatch.setattr(main, "SessionLocal", TestingSession)
     with engine.begin() as conn:
         conn.execute(text("TRUNCATE clicks, links RESTART IDENTITY CASCADE"))
     yield
